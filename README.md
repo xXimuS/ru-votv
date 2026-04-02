@@ -170,6 +170,16 @@ python translations/gui_translator.py \
   --output-pak translations/output/ZZ_GameRuPatch_P.pak
 ```
 
+Если на твоей системе Tk криво рендерит кириллицу или интерфейс слишком мелкий, можно переопределить шрифт и масштаб вручную:
+
+```bash
+python translations/gui_translator.py \
+  --csv translations/Game/Game_strings.csv \
+  --font-family clearlyu \
+  --mono-font-family "nimbus mono l" \
+  --scale 1.25
+```
+
 Если упаковка не срабатывает, сначала проверь:
 
 * что `python` действительно запускает Python 3

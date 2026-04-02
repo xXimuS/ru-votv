@@ -47,6 +47,19 @@ def parse_args() -> argparse.Namespace:
         default=Path("translations/output/ZZ_GameRuPatch_P.pak"),
         help="Куда сохранять собранный pak",
     )
+    parser.add_argument(
+        "--font-family",
+        help="Явно задать семейство UI-шрифта, если автоопределение промахнулось",
+    )
+    parser.add_argument(
+        "--mono-font-family",
+        help="Явно задать семейство моноширинного шрифта для списка ID",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        help="Явно задать коэффициент масштабирования интерфейса, например 1.35",
+    )
     return parser.parse_args()
 
 
@@ -200,8 +213,14 @@ class TranslatorApp:
         locres_path: Path,
         output_locres: Path,
         output_pak: Path,
+        font_family_override: str | None = None,
+        mono_font_family_override: str | None = None,
+        scale_override: float | None = None,
     ) -> None:
         self.root = root
+        self.font_family_override = normalized(font_family_override)
+        self.mono_font_family_override = normalized(mono_font_family_override)
+        self.scale_override = scale_override
         self.enable_hidpi_awareness()
         self.configure_scaling()
         self.configure_fonts_and_style()
@@ -242,11 +261,14 @@ class TranslatorApp:
                 pass
 
     def configure_scaling(self) -> None:
-        try:
-            dpi = float(self.root.winfo_fpixels("1i"))
-        except Exception:
-            dpi = 96.0
-        scaling = max(1.15, min(2.2, dpi / 96.0))
+        if self.scale_override is not None:
+            scaling = max(0.9, min(3.0, float(self.scale_override)))
+        else:
+            try:
+                dpi = float(self.root.winfo_fpixels("1i"))
+            except Exception:
+                dpi = 96.0
+            scaling = max(1.15, min(2.2, dpi / 96.0))
         self.ui_scale = scaling
         self.root.tk.call("tk", "scaling", scaling)
 
@@ -264,28 +286,8 @@ class TranslatorApp:
         heading_size = max(13, base_size + 1)
         title_size = max(14, base_size + 2)
 
-        ui_family = self.pick_font_family(
-            [
-                "Noto Sans",
-                "DejaVu Sans",
-                "Segoe UI",
-                "Cantarell",
-                "Liberation Sans",
-                "Arial",
-                "Helvetica",
-            ]
-        )
-        mono_family = self.pick_font_family(
-            [
-                "Cascadia Mono",
-                "Consolas",
-                "Noto Sans Mono",
-                "DejaVu Sans Mono",
-                "Liberation Mono",
-                "Courier New",
-                "Courier",
-            ]
-        )
+        ui_family = self.pick_ui_font_family()
+        mono_family = self.pick_mono_font_family()
 
         default_font = tkfont.nametofont("TkDefaultFont")
         text_font = tkfont.nametofont("TkTextFont")
@@ -311,20 +313,126 @@ class TranslatorApp:
 
         rowheight = max(26, int(round(24 * self.ui_scale)))
         padding = max(6, int(round(6 * self.ui_scale)))
+        self.root.option_add("*Font", self.ui_fonts["default"])
         style.configure(".", font=self.ui_fonts["default"])
+        style.configure("TLabel", font=self.ui_fonts["default"])
+        style.configure("TButton", font=self.ui_fonts["default"], padding=(padding, padding // 2))
+        style.configure("TEntry", font=self.ui_fonts["default"], padding=(padding // 2, padding // 3))
+        style.configure("TCombobox", font=self.ui_fonts["default"], padding=(padding // 2, padding // 3))
+        style.configure("TMenubutton", font=self.ui_fonts["default"])
+        style.configure("TLabelframe", font=self.ui_fonts["default"])
+        style.configure("TLabelframe.Label", font=self.ui_fonts["bold"])
         style.configure("Treeview", font=self.ui_fonts["default"], rowheight=rowheight)
         style.configure("Treeview.Heading", font=self.ui_fonts["bold"])
-        style.configure("TButton", padding=(padding, padding // 2))
-        style.configure("TEntry", padding=(padding // 2, padding // 3))
-        style.configure("TCombobox", padding=(padding // 2, padding // 3))
-        style.configure("TLabelframe.Label", font=self.ui_fonts["bold"])
+        self.selected_ui_family = ui_family
+        self.selected_mono_family = mono_family
 
-    def pick_font_family(self, candidates: list[str]) -> str:
-        available = {name.lower(): name for name in tkfont.families(self.root)}
+    def font_looks_safe_for_cyrillic(self, family: str) -> bool:
+        sample_ru = "Статус: translated | Повторов: 1 | Вариантов перевода: 1"
+        sample_en = "Status: translated | Repeats: 1 | Variants: 1"
+        blocked_words = ("dingbat", "symbol", "cursor", "glyph", "nil")
+        family_lc = family.lower()
+        if any(word in family_lc for word in blocked_words):
+            return False
+        try:
+            probe = tkfont.Font(root=self.root, family=family, size=14)
+        except Exception:
+            return False
+        actual = str(probe.actual("family") or "").lower()
+        if actual == "fixed":
+            return False
+        if any(word in actual for word in blocked_words):
+            return False
+        width_ru = probe.measure(sample_ru)
+        width_en = probe.measure(sample_en)
+        if width_ru <= 0 or width_en <= 0:
+            return False
+        return (width_ru / width_en) < 1.55
+
+    def pick_first_working_family(self, candidates: Iterable[str], *, require_cyrillic: bool) -> str | None:
+        seen: set[str] = set()
         for candidate in candidates:
-            if candidate.lower() in available:
-                return available[candidate.lower()]
+            family = normalized(candidate)
+            if not family:
+                continue
+            key = family.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if require_cyrillic:
+                if self.font_looks_safe_for_cyrillic(family):
+                    return family
+                continue
+            try:
+                probe = tkfont.Font(root=self.root, family=family, size=12)
+            except Exception:
+                continue
+            actual = str(probe.actual("family") or "").lower()
+            if actual:
+                return family
+        return None
+
+    def pick_ui_font_family(self) -> str:
+        platform_candidates = {
+            "win32": [
+                "Segoe UI",
+                "Tahoma",
+                "Verdana",
+                "Arial",
+                "Noto Sans",
+                "DejaVu Sans",
+            ],
+            "darwin": [
+                "SF Pro Text",
+                "Helvetica Neue",
+                "Arial",
+                "Noto Sans",
+            ],
+        }
+        generic_candidates = [
+            "clearlyu",
+            "clean",
+            "Noto Sans",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Cantarell",
+            "Segoe UI",
+            "Arial",
+            "Helvetica",
+            "nimbus sans l",
+        ]
+        fallback_candidates = sorted(set(tkfont.families(self.root)))
+        candidates = []
+        if self.font_family_override:
+            candidates.append(self.font_family_override)
+        candidates.extend(platform_candidates.get(sys.platform, []))
+        candidates.extend(generic_candidates)
+        candidates.extend(fallback_candidates)
+        chosen = self.pick_first_working_family(candidates, require_cyrillic=True)
+        if chosen:
+            return chosen
         return tkfont.nametofont("TkDefaultFont").cget("family")
+
+    def pick_mono_font_family(self) -> str:
+        candidates = []
+        if self.mono_font_family_override:
+            candidates.append(self.mono_font_family_override)
+        candidates.extend(
+            [
+                "Cascadia Mono",
+                "Consolas",
+                "Noto Sans Mono",
+                "DejaVu Sans Mono",
+                "Liberation Mono",
+                "Courier New",
+                "Courier",
+                "nimbus mono l",
+            ]
+        )
+        chosen = self.pick_first_working_family(candidates, require_cyrillic=False)
+        if chosen:
+            return chosen
+        return tkfont.nametofont("TkFixedFont").cget("family")
 
     def configure_window(self) -> None:
         screen_w = max(1280, self.root.winfo_screenwidth())
@@ -774,6 +882,9 @@ def main() -> None:
         locres_path=args.locres.resolve() if args.locres.exists() else args.locres,
         output_locres=args.output_locres.resolve() if args.output_locres.exists() else args.output_locres,
         output_pak=args.output_pak.resolve() if args.output_pak.exists() else args.output_pak,
+        font_family_override=args.font_family,
+        mono_font_family_override=args.mono_font_family,
+        scale_override=args.scale,
     )
     root.mainloop()
 
