@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterable
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 
 def parse_args() -> argparse.Namespace:
@@ -202,8 +202,11 @@ class TranslatorApp:
         output_pak: Path,
     ) -> None:
         self.root = root
+        self.enable_hidpi_awareness()
+        self.configure_scaling()
+        self.configure_fonts_and_style()
         self.root.title("VotV Translation GUI")
-        self.root.geometry("1500x900")
+        self.configure_window()
 
         self.repo_root = Path(__file__).resolve().parents[1]
         self.project = TranslationProject(csv_path)
@@ -223,11 +226,97 @@ class TranslatorApp:
         self.refresh_tree()
         self.update_status_bar()
 
+    def enable_hidpi_awareness(self) -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try:
+                import ctypes
+
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+    def configure_scaling(self) -> None:
+        try:
+            dpi = float(self.root.winfo_fpixels("1i"))
+        except Exception:
+            dpi = 96.0
+        scaling = max(1.15, min(2.2, dpi / 96.0))
+        self.ui_scale = scaling
+        self.root.tk.call("tk", "scaling", scaling)
+
+    def configure_fonts_and_style(self) -> None:
+        style = ttk.Style(self.root)
+        try:
+            if "clam" in style.theme_names():
+                style.theme_use("clam")
+        except Exception:
+            pass
+
+        base_size = max(12, int(round(11 * self.ui_scale)))
+        small_size = max(11, base_size - 1)
+        mono_size = max(11, base_size - 1)
+        heading_size = max(13, base_size + 1)
+        title_size = max(14, base_size + 2)
+
+        default_font = tkfont.nametofont("TkDefaultFont")
+        text_font = tkfont.nametofont("TkTextFont")
+        fixed_font = tkfont.nametofont("TkFixedFont")
+        heading_font = tkfont.nametofont("TkHeadingFont")
+        menu_font = tkfont.nametofont("TkMenuFont")
+
+        for font_obj, size in (
+            (default_font, base_size),
+            (text_font, base_size),
+            (fixed_font, mono_size),
+            (heading_font, heading_size),
+            (menu_font, base_size),
+        ):
+            font_obj.configure(size=size)
+
+        self.ui_fonts = {
+            "default": default_font,
+            "text": text_font,
+            "fixed": fixed_font,
+            "heading": heading_font,
+            "title": tkfont.Font(family=default_font.cget("family"), size=title_size, weight="bold"),
+            "bold": tkfont.Font(family=default_font.cget("family"), size=base_size, weight="bold"),
+            "small": tkfont.Font(family=default_font.cget("family"), size=small_size),
+        }
+
+        rowheight = max(26, int(round(24 * self.ui_scale)))
+        padding = max(6, int(round(6 * self.ui_scale)))
+        style.configure(".", font=self.ui_fonts["default"])
+        style.configure("Treeview", font=self.ui_fonts["default"], rowheight=rowheight)
+        style.configure("Treeview.Heading", font=self.ui_fonts["bold"])
+        style.configure("TButton", padding=(padding, padding // 2))
+        style.configure("TEntry", padding=(padding // 2, padding // 3))
+        style.configure("TCombobox", padding=(padding // 2, padding // 3))
+        style.configure("TLabelframe.Label", font=self.ui_fonts["bold"])
+
+    def configure_window(self) -> None:
+        screen_w = max(1280, self.root.winfo_screenwidth())
+        screen_h = max(800, self.root.winfo_screenheight())
+        width = min(int(screen_w * 0.92), 2200)
+        height = min(int(screen_h * 0.9), 1400)
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(1200, 760)
+
     def _build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
 
-        toolbar = ttk.Frame(self.root, padding=8)
+        outer_pad = max(10, int(round(10 * self.ui_scale)))
+        block_pad = max(8, int(round(8 * self.ui_scale)))
+        text_height = max(10, int(round(8 * self.ui_scale)))
+        ids_height = max(12, int(round(10 * self.ui_scale)))
+
+        toolbar = ttk.Frame(self.root, padding=outer_pad)
         toolbar.grid(row=0, column=0, sticky="nsew")
         toolbar.columnconfigure(1, weight=1)
 
@@ -248,7 +337,7 @@ class TranslatorApp:
             textvariable=self.filter_var,
             values=list(self.FILTER_LABELS.keys()),
             state="readonly",
-            width=18,
+            width=20,
         )
         filter_box.grid(row=1, column=2, padx=4, pady=(8, 0))
         filter_box.bind("<<ComboboxSelected>>", lambda _event: self.refresh_tree())
@@ -265,12 +354,12 @@ class TranslatorApp:
         main = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         main.grid(row=1, column=0, sticky="nsew")
 
-        left = ttk.Frame(main, padding=8)
+        left = ttk.Frame(main, padding=outer_pad)
         left.columnconfigure(0, weight=1)
         left.rowconfigure(0, weight=1)
         main.add(left, weight=5)
 
-        right = ttk.Frame(main, padding=8)
+        right = ttk.Frame(main, padding=outer_pad)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(7, weight=1)
         main.add(right, weight=6)
@@ -292,17 +381,31 @@ class TranslatorApp:
         tree_scroll.grid(row=0, column=1, sticky="ns")
         self.tree.configure(yscrollcommand=tree_scroll.set)
 
-        ttk.Label(right, textvariable=self.group_summary_var, font=("TkDefaultFont", 10, "bold")).grid(
+        ttk.Label(right, textvariable=self.group_summary_var, font=self.ui_fonts["title"]).grid(
             row=0, column=0, sticky="w"
         )
 
         ttk.Label(right, text="English").grid(row=1, column=0, sticky="w", pady=(10, 2))
-        self.english_text = tk.Text(right, height=8, wrap="word")
+        self.english_text = tk.Text(
+            right,
+            height=text_height,
+            wrap="word",
+            font=self.ui_fonts["text"],
+            padx=10,
+            pady=10,
+        )
         self.english_text.grid(row=2, column=0, sticky="nsew")
         self.english_text.configure(state="disabled")
 
         ttk.Label(right, text="Russian").grid(row=3, column=0, sticky="w", pady=(10, 2))
-        self.russian_text = tk.Text(right, height=8, wrap="word")
+        self.russian_text = tk.Text(
+            right,
+            height=text_height,
+            wrap="word",
+            font=self.ui_fonts["text"],
+            padx=10,
+            pady=10,
+        )
         self.russian_text.grid(row=4, column=0, sticky="nsew")
         self.russian_text.bind("<<Modified>>", self.on_russian_modified)
 
@@ -312,10 +415,14 @@ class TranslatorApp:
         ttk.Button(buttons, text="Откатить группу", command=self.revert_current_group).pack(side=tk.LEFT, padx=(0, 6))
 
         ttk.Label(right, text="ID строк в группе").grid(row=6, column=0, sticky="w", pady=(10, 2))
-        self.ids_list = tk.Listbox(right, height=10)
+        self.ids_list = tk.Listbox(
+            right,
+            height=ids_height,
+            font=self.ui_fonts["fixed"],
+        )
         self.ids_list.grid(row=7, column=0, sticky="nsew")
 
-        build_frame = ttk.LabelFrame(right, text="Сборка", padding=8)
+        build_frame = ttk.LabelFrame(right, text="Сборка", padding=block_pad)
         build_frame.grid(row=8, column=0, sticky="ew", pady=(12, 0))
         build_frame.columnconfigure(1, weight=1)
 
@@ -336,7 +443,14 @@ class TranslatorApp:
         ttk.Button(build_buttons, text="Build locres", command=self.build_locres).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(build_buttons, text="Pack pak", command=self.pack_pak).pack(side=tk.LEFT)
 
-        status = ttk.Label(self.root, textvariable=self.status_var, padding=8, relief=tk.SUNKEN, anchor="w")
+        status = ttk.Label(
+            self.root,
+            textvariable=self.status_var,
+            padding=outer_pad,
+            relief=tk.SUNKEN,
+            anchor="w",
+            font=self.ui_fonts["small"],
+        )
         status.grid(row=2, column=0, sticky="ew")
 
     def set_status(self, text: str) -> None:
