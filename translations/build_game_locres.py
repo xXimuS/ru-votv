@@ -18,7 +18,7 @@ def _make_id(namespace: str, key: str, hash_value: int) -> str:
 
 def load_strings(strings_path: Path) -> dict[str, str]:
     mapping: dict[str, str] = {}
-    with strings_path.open("r", encoding="utf-8", newline="") as f:
+    with strings_path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         required = {"id", "english", "russian"}
         missing = required - set(reader.fieldnames or [])

@@ -143,6 +143,33 @@ python translations/duplicate_helper.py sync \
 python translations/duplicate_helper.py sync --all-conflicts --strategy translated-most-common --write
 ```
 
+### GUI без повторов
+
+Если не хочешь редактировать CSV руками, есть кроссплатформенный GUI на стандартном `Tkinter`:
+
+```bash
+python translations/gui_translator.py
+```
+
+Что умеет:
+
+* показывает каждую уникальную строку `english` только один раз
+* редактирует один `russian` сразу для всей группы дублей
+* ищет по строкам и фильтрует `translated / untranslated / conflict`
+* показывает все `id`, которые входят в группу
+* умеет сохранять CSV
+* умеет прямо из окна собрать `Game_ru.locres` и упаковать `ZZ_GameRuPatch_P.pak`
+
+Можно сразу указать свои пути:
+
+```bash
+python translations/gui_translator.py \
+  --csv translations/Game/Game_strings.csv \
+  --locres VotV/Content/Localization/Game/en/Game.locres \
+  --output-locres translations/output/Game_ru.locres \
+  --output-pak translations/output/ZZ_GameRuPatch_P.pak
+```
+
 Если упаковка не срабатывает, сначала проверь:
 
 * что `python` действительно запускает Python 3
