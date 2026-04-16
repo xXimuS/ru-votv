@@ -287,7 +287,6 @@ class TranslatorApp:
         self._build_ui()
         self.refresh_tree()
         self.update_status_bar()
-        self.is_refreshing_visuals = False
         self.russian_text.configure(autoseparators=True, undo=True)
         self.root.after(self.autosave_interval, self.run_autosave)
     
